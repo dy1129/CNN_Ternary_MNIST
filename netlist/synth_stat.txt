@@ -1,0 +1,66 @@
+
+20. Printing statistics.
+
+=== chip ===
+
+   Number of wires:             268897
+   Number of wire bits:         275404
+   Number of public wires:        9755
+   Number of public wire bits:   16262
+   Number of ports:                 29
+   Number of port bits:           6536
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:             253571
+     AND2x2_ASAP7_75t_R           8485
+     AND3x1_ASAP7_75t_R           5958
+     AND4x1_ASAP7_75t_R           1231
+     AND5x1_ASAP7_75t_R            472
+     AO211x2_ASAP7_75t_R             1
+     AO21x1_ASAP7_75t_R          33653
+     AO21x2_ASAP7_75t_R              1
+     AO221x1_ASAP7_75t_R          1675
+     AO22x1_ASAP7_75t_R            984
+     AO31x2_ASAP7_75t_R              3
+     AO32x1_ASAP7_75t_R           1237
+     AOI211x1_ASAP7_75t_R          304
+     AOI21x1_ASAP7_75t_R         15867
+     AOI221x1_ASAP7_75t_R          215
+     AOI22x1_ASAP7_75t_R          1496
+     BUFx2_ASAP7_75t_R           13689
+     BUFx3_ASAP7_75t_R             366
+     BUFx4_ASAP7_75t_R              87
+     BUFx4f_ASAP7_75t_R             25
+     BUFx5_ASAP7_75t_R             122
+     BUFx6f_ASAP7_75t_R             47
+     DFFASRHQNx1_ASAP7_75t_R     10906
+     DFFHQNx1_ASAP7_75t_R        12628
+     FAx1_ASAP7_75t_R             4653
+     HAxp5_ASAP7_75t_R           10649
+     INVx1_ASAP7_75t_R           40799
+     INVx2_ASAP7_75t_R              19
+     INVx3_ASAP7_75t_R               1
+     NAND2x1_ASAP7_75t_R         13597
+     NAND2x2_ASAP7_75t_R            10
+     NAND3x1_ASAP7_75t_R           623
+     NOR2x1_ASAP7_75t_R          33258
+     NOR2x2_ASAP7_75t_R             12
+     NOR3x1_ASAP7_75t_R            244
+     OA211x2_ASAP7_75t_R           674
+     OA21x2_ASAP7_75t_R          11299
+     OA22x2_ASAP7_75t_R            255
+     OAI21x1_ASAP7_75t_R         18589
+     OAI22x1_ASAP7_75t_R          2017
+     OR2x2_ASAP7_75t_R            1163
+     OR3x1_ASAP7_75t_R            2550
+     OR4x1_ASAP7_75t_R              88
+     OR5x1_ASAP7_75t_R              88
+     TIEHIx1_ASAP7_75t_R             1
+     XNOR2x2_ASAP7_75t_R           385
+     XOR2x1_ASAP7_75t_R              1
+     XOR2x2_ASAP7_75t_R           3144
+
+   Chip area for module '\chip': 28967.616900
+     of which used for sequential elements: 7816.571280 (26.98%)
+
