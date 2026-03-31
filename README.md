@@ -100,6 +100,23 @@ An energy-efficiency-oriented design that achieves 93% power reduction and 47× 
 
 ---
 
+## Hardware Deployment
+
+### System Pipeline
+
+```
+PC (Python GUI) → UART (460,800 baud) → Artix-7 FPGA → CNN Inference → LED Output
+```
+
+- Developed Python-based GUI for real-time handwritten digit input and UART transmission
+- Integrated full inference pipeline on Xilinx Artix-7 FPGA (Conv1 → Pool → Conv2 → Pool → FC → Comparator)
+- **Verification**: Confirmed LSB-level agreement between PyTorch model and RTL output through cycle-accurate testbench simulation
+- **Hardware Debugging (In Progress)**: Identified UART synchronization and timing constraints during physical board testing; investigating clock domain crossing (CDC) and FIFO buffering for stable output
+
+> **Note**: All RTL logic is verified to be functionally correct in simulation. The current challenge is physical-layer integration (UART timing, pin constraints), not logic correctness.
+
+---
+
 ## Award
 
 🥈 **Silver Award** — Kyungpook National University IDEC 2024 Creative Circuit Design Challenge
