@@ -1,0 +1,310 @@
+import tkinter as tk
+from tkinter import ttk, messagebox
+from PIL import Image, ImageDraw, ImageOps, ImageTk
+import serial, serial.tools.list_ports
+import time # time 모듈 추가
+
+# ===== 설정 =====
+CANVAS_PIX = 600
+GRID_SIZE = 28
+BRUSH_RADIUS = 8
+BAUDRATE = 460800
+DEFAULT_INVERT_TO_MNIST = True
+RECV_TIMEOUT_MS = 100 # 수신 폴링 주기 (100ms)
+
+class App:
+    def __init__(self, root):
+        self.root = root
+        root.title("28x28 Handwriting ↔ UART (RX/TX)")
+
+        # 상태
+        self.drawing = False
+        self.last = (0, 0)
+        self.ser = None
+        self.data_count = 0 # 수신된 바이트 카운터
+
+        # 옵션
+        self.opt_invert = tk.BooleanVar(value=DEFAULT_INVERT_TO_MNIST)
+        self.opt_preview = tk.BooleanVar(value=True)
+
+        # ===== 레이아웃 =====
+        main_frame = ttk.Frame(root)
+        main_frame.pack(padx=8, pady=8, fill="both", expand=True)
+
+        left = ttk.Frame(main_frame)
+        left.grid(row=0, column=0, padx=8, pady=8, sticky="n")
+
+        right = ttk.Frame(main_frame)
+        right.grid(row=0, column=1, padx=8, pady=8, sticky="n")
+
+        # ===== 좌측: 그리기 =====
+        self.canvas = tk.Canvas(left, width=CANVAS_PIX, height=CANVAS_PIX, bg="white")
+        self.canvas.grid(row=0, column=0)
+        self.canvas.bind("<ButtonPress-1>", self.on_down)
+        self.canvas.bind("<B1-Motion>", self.on_move)
+        self.canvas.bind("<ButtonRelease-1>", self.on_up)
+
+        self.img = Image.new("L", (CANVAS_PIX, CANVAS_PIX), color=255)
+        self.draw = ImageDraw.Draw(self.img)
+
+        # ===== 우측 패널 =====
+        
+        # 1. 시리얼 설정
+        ttk.Label(right, text="Serial Port").grid(row=0, column=0, sticky="w")
+        self.port_combo = ttk.Combobox(
+            right, values=self.list_ports(), width=18, state="readonly")
+        self.port_combo.grid(row=1, column=0, sticky="w")
+        if self.port_combo["values"]:
+            self.port_combo.current(0)
+
+        row = 2
+        ttk.Button(right, text="Open", command=self.open_port).grid(
+            row=row, column=0, sticky="we", pady=(6, 0)); row += 1
+        ttk.Button(right, text="Close", command=self.close_port).grid(
+            row=row, column=0, sticky="we"); row += 1
+
+        # 2. 전처리 및 전송
+        ttk.Label(right, text="Preprocess & Send").grid(
+            row=row, column=0, sticky="w", pady=(10, 0)); row += 1
+        ttk.Checkbutton(right, text="Invert to MNIST (배경0/글자255)", 
+                        variable=self.opt_invert, command=self.update_preview).grid(
+                            row=row, column=0, sticky="w"); row += 1
+        ttk.Checkbutton(right, text="Show 28×28 Preview", 
+                        variable=self.opt_preview, command=self.update_preview).grid(
+                            row=row, column=0, sticky="w"); row += 1
+
+        ttk.Button(right, text="Send (Enter/Space) 784B", command=self.send_now).grid(
+            row=row, column=0, sticky="we", pady=(10, 0)); row += 1
+        ttk.Button(right, text="Clear (C)", command=self.clear).grid(
+            row=row, column=0, sticky="we"); row += 1
+        
+        ttk.Label(right, text=f"baud={BAUDRATE}").grid(
+            row=row, column=0, sticky="e"); row += 1
+        
+        # 3. 프리뷰
+        ttk.Label(right, text="Preview").grid(row=row, column=0,
+                                              pady=(10, 2), sticky="w"); row += 1
+
+        self.preview_canvas = tk.Canvas(
+            right, width=CANVAS_PIX // 2, height=CANVAS_PIX // 2, bg="#f5f5f5")
+        self.preview_canvas.grid(row=row, column=0, sticky="we")
+        row += 1
+        
+        # 4. 수신 로그 (새로운 영역)
+        ttk.Label(right, text="RX Log").grid(row=row, column=0,
+                                              pady=(10, 2), sticky="w"); row += 1
+        
+        self.log_text = tk.Text(right, height=10, width=40, state='disabled')
+        self.log_text.grid(row=row, column=0, sticky="we")
+        row += 1
+
+
+        # 키 바인딩
+        root.bind("<space>", lambda e: self.send_now())
+        root.bind("<Return>", lambda e: self.send_now())
+        root.bind("<c>", lambda e: self.clear())
+        root.bind("<C>", lambda e: self.clear())
+
+        self.redraw_canvas()
+        self.update_preview()
+        
+        # 주기적인 수신 폴링 시작
+        self.read_serial()
+
+
+     # ---------- 시리얼 ----------
+    def list_ports(self):
+        return [p.device for p in serial.tools.list_ports.comports()]
+
+    def open_port(self):
+        port = self.port_combo.get()
+        if not port:
+            messagebox.showwarning("Serial", "포트를 선택하세요.")
+            return
+        try:
+            # timeout을 0.2초로 설정하여 read_all()이 너무 오래 블로킹되는 것을 방지
+            self.ser = serial.Serial(port, BAUDRATE, timeout=0.2) 
+            self.write_log(f"--- Serial Port Opened {port} @ {BAUDRATE} ---")
+            messagebox.showinfo("Serial", f"Opened {port} @ {BAUDRATE}")
+        except Exception as e:
+            messagebox.showerror("Serial", f"Open failed: {e}")
+
+    def close_port(self):
+        # ... (기존 close_port 코드 유지) ...
+        if self.ser:
+            try:
+                self.ser.close()
+            except:
+                pass
+            self.ser = None
+            self.write_log("--- Serial Port Closed ---")
+            messagebox.showinfo("Serial", "Closed.")
+        
+    def write_log(self, text):
+        self.log_text.config(state='normal')
+        self.log_text.insert(tk.END, text + "\n")
+        self.log_text.see(tk.END) # 스크롤을 맨 아래로 이동
+        self.log_text.config(state='disabled')
+
+    def read_serial(self):
+        """
+        주기적으로 시리얼 포트를 폴링하여 데이터를 읽어옵니다. (수신 데이터 콘솔 출력 추가)
+        """
+        if self.ser and self.ser.is_open:
+            try:
+                # 버퍼에 있는 모든 데이터를 읽음
+                received_data = self.ser.read_all() 
+                
+                if received_data:
+                    self.data_count += len(received_data)
+                    hex_string = received_data.hex().upper()
+
+                    # 1. GUI 로그에는 전체 HEX 문자열 출력
+                    self.write_log(f"RX {len(received_data)}B (Total {self.data_count}B): {hex_string}")
+
+                    # 2. 콘솔에 TX와 같은 형식으로 출력
+                    print("\n===============================================")
+                    print(f"[RX] Received {len(received_data)} bytes (HEX):")
+                    for i in range(0, len(hex_string), 32):  # 16 bytes = 32 hex chars
+                        chunk = hex_string[i:i+32]
+                        # 2자리씩 나누어 공백 삽입
+                        formatted = ' '.join(chunk[j:j+2] for j in range(0, len(chunk), 2))
+                        print(formatted)
+                    print("===============================================")
+
+            except Exception as e:
+                self.write_log(f"Read error: {e}")
+
+                    
+                    # TODO: 여기서 FPGA가 보낸 결과(예: 분류 결과)를 처리하는 로직을 추가해야 합니다.
+                    
+            except Exception as e:
+                self.write_log(f"RX Error: {e}")
+
+        # RECV_TIMEOUT_MS 후에 함수를 다시 호출하여 폴링을 지속합니다.
+        self.root.after(RECV_TIMEOUT_MS, self.read_serial) 
+        
+        
+    # ---------- 드로잉 및 전송 ----------
+    def on_down(self, e):
+        self.drawing = True
+        self.last = (e.x, e.y)
+        self.draw_dot(e.x, e.y)
+
+    def on_move(self, e):
+        if not self.drawing:
+            return
+        x0, y0 = self.last
+        x1, y1 = e.x, e.y
+        self.draw.line((x0, y0, x1, y1), fill=0, width=BRUSH_RADIUS * 2)
+        self.draw.ellipse((x1 - BRUSH_RADIUS, y1 - BRUSH_RADIUS,
+                            x1 + BRUSH_RADIUS, y1 + BRUSH_RADIUS),
+                            fill=0)
+        self.last = (x1, y1)
+        self.redraw_canvas()
+        self.update_preview()
+
+    def on_up(self, e):
+        self.drawing = False
+
+    def draw_dot(self, x, y):
+        self.draw.ellipse((x - BRUSH_RADIUS, y - BRUSH_RADIUS,
+                            x + BRUSH_RADIUS, y + BRUSH_RADIUS),
+                            fill=0)
+        self.redraw_canvas()
+        self.update_preview()
+
+    def clear(self):
+        self.img = Image.new("L", (CANVAS_PIX, CANVAS_PIX), color=255)
+        self.draw = ImageDraw.Draw(self.img)
+        self.canvas.delete("all")
+        self.preview_canvas.delete("all")
+        self.redraw_canvas()
+        self.update_preview()
+        
+        self.data_count = 0 # 카운터 리셋
+        self.write_log("--- Canvas Cleared ---")
+
+    # ---------- 렌더링 ----------
+    def redraw_canvas(self):
+        self.canvas.delete("all")
+        tkimg = ImageTk.PhotoImage(self.img)
+        self.canvas.image = tkimg
+        self.canvas.create_image(0, 0, anchor="nw", image=tkimg)
+
+    def update_preview(self):
+        if not self.opt_preview.get():
+            self.preview_canvas.delete("all")
+            return
+        small = self.make_28x28_processed()
+        zoom = small.resize((CANVAS_PIX // 2, CANVAS_PIX // 2), Image.NEAREST)
+        tkimg = ImageTk.PhotoImage(zoom.convert("RGB"))
+        self.preview_canvas.image = tkimg
+        self.preview_canvas.create_image(0, 0, anchor="nw", image=tkimg)
+
+    # ---------- 전처리 ----------
+    def make_28x28_processed(self):
+        img = self.img
+        small = img.resize((GRID_SIZE, GRID_SIZE), Image.BILINEAR)
+        if self.opt_invert.get():
+            small = ImageOps.invert(small)
+        return small
+
+    def to_784_bytes(self):
+        return bytes(self.make_28x28_processed().getdata())
+
+    # ---------- 전송 ----------
+    def send_now(self):
+        if self.ser is None or not self.ser.is_open:
+            messagebox.showwarning("Serial", "먼저 포트를 여세요.")
+            return
+
+        payload = self.to_784_bytes()
+        if len(payload) != 784:
+            messagebox.showerror("Data", f"Length {len(payload)} != 784")
+            return
+
+        try:
+            # IDLE 콘솔에 전송 데이터 내용 출력
+            print("===============================================")
+            print("[TX] Sending 784 bytes payload (HEX):")
+            hex_payload = payload.hex().upper()
+            # 16바이트씩 줄바꿈하여 출력
+            for i in range(0, len(hex_payload), 32):
+                print(' '.join(hex_payload[i:i+32][j:j+2] for j in range(0, 32, 2)))
+            print("===============================================")
+
+            self.write_log(f"TX {len(payload)}B: Sending burst...")
+            
+            baudrate = BAUDRATE
+            total_bits = len(payload) * 10
+            theoretical_time_ms = total_bits / baudrate * 1000
+
+            start_time = time.perf_counter_ns()
+
+            # 🔁 단 한 번에 전체 데이터를 전송 (Burst Write)
+            self.ser.write(payload) 
+
+            end_time = time.perf_counter_ns()
+            elapsed_ns = end_time - start_time
+            
+            # --- Python 송신 로그 (GUI 로그창) ---
+            self.write_log(f"--- TX Report ---")
+            self.write_log(f"Size: {len(payload)} Bytes ({total_bits} bits)")
+            self.write_log(f"BAUD: {baudrate} bps")
+            self.write_log(f"Theoretical TX Time: {theoretical_time_ms:.3f} ms")
+            self.write_log(f"Actual TX Time (Driver overhead): {elapsed_ns / 1_000_000:.3f} ms")
+            self.write_log(f"-----------------")
+
+        except Exception as e:
+            messagebox.showerror("Serial", f"Send failed: {e}")
+
+        
+
+# ==== 실행 ====
+if __name__ == "__main__":
+    root = tk.Tk()
+    # 파이썬에서 GUI가 닫힐 때 Serial 포트가 닫히도록 프로토콜 핸들러 추가
+    app = App(root)
+    root.protocol("WM_DELETE_WINDOW", lambda: (app.close_port(), root.destroy())) 
+    root.mainloop()
